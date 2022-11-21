@@ -1,0 +1,51 @@
+---
+name: Common commit checks
+# yamllint disable-line rule:truthy
+on:
+  pull_request:
+  workflow_call:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  # Check commit message according to guidance
+  # https://confluence-ng.sentinelone.com/pages/viewpage.action?pageId=68396218
+  check-commit-msg:
+    runs-on: org-autoscaler
+    steps:
+      - name: Check JIRA ticket or Trivial
+        uses: gsactions/commit-message-checker@v1
+        with:
+          pattern: >
+            ^((((feat)|(chore)|(fix)|(hotfix-(.*))):\s?\[[A-Z]{2,}-[0-9]{1,}\])|(trivial:)|(fixup!)|(squash!)|(Merge)|(Revert)|(chore\(deps.*\): bump))(.*)
+          error: 'No feat|fix|chore with ticket referenced or no trivial/merge commit found.'
+          excludeDescription: 'true'  # optional: this excludes the description body of a pull request
+          excludeTitle: 'true'  # optional: this excludes the title of a pull request
+          checkAllCommitMessages: 'true'  # optional: this checks all commits associated with a pull request
+          accessToken: ${{ secrets.GITHUB_TOKEN }}  # only if checkAllCommitMessages is true
+  # Block !fixup / !squash commits
+  block-fixup-commits:
+    runs-on: org-autoscaler
+    steps:
+      - name: Block Autosquash Commits
+        uses: xt0rted/block-autosquash-commits-action@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+  # Common check (this one should be required) so that any future changes can be aggregated here
+  # without updating the checks across repositories.
+  commit-checks-pass:
+    runs-on: org-autoscaler
+    if: ${{ always() }}
+    needs:
+      - check-commit-msg
+      - block-fixup-commits
+    steps:
+      - name: Success
+        if: ${{ needs.block-fixup-commits.result == 'success' && needs.check-commit-msg.result == 'success' }}
+        run: exit 0
+      - name: Fail
+        if: ${{ needs.block-fixup-commits.result != 'success' || needs.check-commit-msg.result != 'success' }}
+        run: exit 1
